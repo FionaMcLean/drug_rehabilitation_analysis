@@ -1,0 +1,175 @@
+---
+title: 'An Analysis of Drug Treatment in the United States'
+author: Fiona McLean
+
+output: pdf_document
+
+header-includes:
+  - \usepackage[table,xcdraw]{xcolor}
+  - \usepackage{subcaption}
+  - \usepackage{float}
+---
+
+
+\newcommand{\subfloat}[2][need a sub-caption]{\subcaptionbox{#1}{#2} }
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(ggmap)
+library(ggsn)
+library(maps)
+library(mapdata)
+
+download.file("http://pbrown.ca/teaching/appliedstats/data/drugs.rds", "drugs.rds")
+xSub = readRDS("drugs.rds")
+
+forInla = na.omit(xSub)  #we need to get rid of na's 
+forInla$y = as.numeric(forInla$completed)
+library("INLA")
+library(dplyr)
+library(ggplot2)
+```
+
+
+## Introduction
+
+Drug rehabilitation for young people is a major concern in the United States, as millions of dollars are funneled into services to help young addicts. Ensuring these rehabilitation programs are effective across states and across the different drug addictions being treated is a major concern for policy makers and health activists. In order to better understand the factors important to the completion of drug rehabilitation programs, two main research questions were proposed and investigated. It was investigated if rehab completion rates differs between drugs and if rehabilitation rates differ across states. It is commonly believed that the completion rates for "hard" drugs, which are drugs such as cocaine and methamphetamine, are lower than rehabilitation completion rates for "soft" drugs such as alcohol and marijuana. It is unclear how completion rates differ across states. Data from the Treatment Episode Data Set (TEDS-D), which is a national census data system of annual discharges from substance abuse treatment facilities was used to investigate the questions above. 
+
+## Methods
+
+The data set used in this analysis is TEDS-D, which contains over 400,000 observations of young adults in rehabilitation programs. The data set includes the drug addiction being treated, the status of completion, and the state and town in which the treatment was given, and other factors known to effect addiction program completion.
+
+As an exploratory tool, tables of completion per state were created, as well as tables comparing completion rates and the drug being treated. Any missing data points were removed. Marijuana was set as the baseline for comparison between drugs.   
+
+In order to determine if (1) rehabilitation completion rates are lower for "hard" drugs than for "soft" drugs and if (2) the completion rates differ greatly between states, a Bayesian generalized linear mixed model was constructed. Bayesian models allow prior information to be incorporated into a model by specifying a prior and allow for complex models with many random variance factors to be fit, providing advantages over a frequentest model. The fixed effects in the model are the addicted substance being treated, the gender, race, homelessness status, age, and education level of rehab patients. The random effects are the town and state the addiction was treated in. Town and state are random effects, as it is likely that success rates in different towns and states follow the same distribution. As the model is Bayesian, all factors have a prior distribution. 
+
+The model is:   
+   
+$Y_{i} \sim Bernoulli(\mu_{i})$  
+$logit(\mu_{i}) = X_{i}\beta + U_{i} +Z_{i}$  
+$U_{i} \space \& \space Z_{i} \sim N(0, \sigma^2)$, where:  
+   
+- $\mu_i$ is the probability of completing rehabilitation  
+- $Y_i$ is the completion for an individual $i$  
+- $X_i\beta$ is the matrix of covariates, has an intercept and is the effects of substance, gender, race, homelessness, age, and education  
+
+  
+The priors are:  
+  
+- $\beta_0 \sim N(0,\infty)$  
+- $\beta_{i} \sim N(0, 1000)$  
+- $\sigma \sim Exponential(1)$   
+  
+
+The priors for the fixed effects were chosen to follow a normal distribution with mean 0 and standard deviation 1000 and standard deviation $\infty$ for the intercept, since the prior is uninformative. The prior on standard deviation for state and town was chosen to be an exponential distribution with $\mu$ = log(2) and $\alpha$ = .5. This prior was chosen because we believe that a state with 1 standard deviation higher of completion rates will have two times the odds of the lower state of completing treatment, and a town 1 standard deviation higher of completion rates will have two times the odds of the lower town of completing treatment. We set the $\alpha$ to .5 because half the time we believe the actual standard deviation will be higher than log(2). As we do not have much prior information, we choose this prior as it is relatively uninformative. 
+
+## Results
+
+To gain some better understanding of what to expect, graphs were created to display the number of completions for each drug. The first chart shows the number of completed drug treatments for each drug being studied. The chart leads us to believe that "soft" drugs such as marijuana and alcohol may have high success rates for completion of treatment than harder drugs such as cocaine and opioids. 
+
+```{r, fig.cap= "We can clearly see that most number of completed drug treatments are for marijuana users. Alcohol completion rates are the second highest, and all other drugs have lower completion rates. The graph shows a higher number of completions for soft drugs and a lower number of completions for hard drugs." , echo=FALSE, fig.align='center',fig.pos='H'}
+forggplot<- forInla %>% filter(y==1)
+ggplot(data= forggplot)+geom_bar(aes(x= SUB1), fill = 'darkblue')+ scale_x_discrete(labels=c("(4) MARIJUANA/HASHISH" = "Marijuana", "(2) ALCOHOL" = "Alcohol", "(5) HEROIN" = "Heroin", "(7) OTHER OPIATES AND SYNTHETICS"= "Other Opiates", "(10) METHAMPHETAMINE"= "Methamphetamine", "(3) COCAINE/CRACK" = "Cocaine/Crack"))+ggtitle("Number of Completed Rehabilitations for Each Drug")+ylab("Number of Completions")+xlab("Drug")
+```
+
+The next chart looks into the second research questions, which is if treatment success rates differ by state and town. The map below shows that there are some states with much higher treatment success rates than others, indicated by a dark green color. This leads us to believe that there may be significant differences is treatment success rates between different locations. 
+
+```{r, fig.cap= "The map above shows that some states have much higher completion of rehab rates than others. For example, Florida has a completion rate abover .6 while Virginia has a completion rate below .2, suggesting significant differences in completion rates. States without data are dark grey. ", echo=FALSE, fig.align='center',fig.pos='H', cache=TRUE}
+
+new_inla <- forInla
+new_inla[,"STFIPS"] <-gsub("^\\d+|\\d+$", "", substring(new_inla$STFIPS,2,10000))
+new_inla[,"STFIPS"] <-tolower(substring(new_inla$STFIPS,3,10000))
+colnames(new_inla)[colnames(new_inla)=="STFIPS"] <- "region"
+
+new_inla <- new_inla %>% 
+    group_by(region) %>%
+    summarize(pct_complete = mean(y == 1))
+
+states <- map_data("state")
+
+dt2 <- left_join(states, new_inla, by = "region")
+
+
+ggplot(data = dt2, aes(x=long, y=lat, group=group))+
+  geom_polygon(aes(fill=pct_complete))+
+  geom_path()+ 
+  scale_fill_gradientn(colours = rev(terrain.colors(10)),na.value = "dark grey",
+                       guide = guide_colourbar(barwidth = 25, barheight = 0.4,
+                                               #put legend title on top of legend
+                                               title.position = "top")) +
+    # map scale
+  ggsn::scalebar(data = dt2, dist = 500, dist_unit = "km",
+           border.size = 0.4, st.size = 4,
+           box.fill = c('black','white'),
+           transform = TRUE, model = "WGS84") + 
+  # put legend at the bottom, adjust legend title and text font sizes
+  theme(legend.position = "bottom",
+        legend.title=element_text(size=12),  # font size of the legend 
+        legend.text=element_text(size=10),
+        axis.title.x=element_blank(),  # remove axis, title, ticks
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y = element_blank(),
+        axis.line=element_blank())+ggtitle("Map of US States Rehab Completion Rates")
+ 
+```
+
+
+```{r, cache=TRUE}
+success = inla(y ~ SUB1 + GENDER + raceEthnicity + homeless + AGE +EDUC+
+            f(STFIPS, hyper=list(prec=list(
+              prior='pc.prec', param=c(log(2), 0.5)))) + # we can change this prior by setting a PC prior on standard deviation σ. For example, we can specify that the probability of σ being greater than 1 is small, equal to .01 - c(1,.01)
+              f(TOWN, hyper=list(prec=list(
+                prior='pc.prec', param=c(log(2), 0.5)))),
+            data=forInla, family='binomial', inla.link.logit,
+            control.inla = list(strategy='gaussian', int.strategy='eb'))  #get rid of strategy gaussian - will take a couple hours 
+
+
+```
+
+
+We now run the Bayesian generalized linear mixed model described above to determine if there exists significant differences in treatment completion between hard and soft drugs as well as between states and towns. The results are shown in Table 1.   
+  
+
+
+```{r}
+sdRes = Pmisc::priorPostSd(success)
+
+sdState = Pmisc::priorPostSd(success)
+toPrint = as.data.frame(rbind(exp(success$summary.fixed[,
+                                                     c(4, 3, 5)]), sdState$summary[, c(4, 3, 5)]))
+sss = "^(raceEthnicity|SUB1|GENDER|homeless|SD)(.[[:digit:]]+.[[:space:]]+| for )?"
+toPrint = cbind(variable = gsub(paste0(sss, ".*"),
+                                "\\1", rownames(toPrint)), category = substr(gsub(sss,
+                                                                                  "", rownames(toPrint)), 1, 25), toPrint)
+Pmisc::mdTable(toPrint, digits = 3, mdToTex = TRUE,
+               guessGroup = TRUE, caption = "Posterior means and quantiles for model parameters.")
+
+
+```
+
+   
+The model suggests that there exist significant differences in rehabilitation completion rates for "hard" and "soft" drugs. As marijuana was set as the baseline for comparison, we see that the odds of treatment completion for all hard drugs (heroin, opiates and synthetics, methamphetamine, cocaine/crack) are lower than the odds of completion treatment for marijuana. Since the odds of completion for alcohol is 1.537 times the odds for marijuana, then the odds of completion for all hard drug users are also lower than for alcohol. Therefore, we can conclude that the odds of completion for hard drugs is lower than for soft drugs. The only drug for which we have less confidence to say the completion rate is lower than marijuana is methamphetamine, since the 97.5 quantile shows odds of 1.029, suggesting that completion rates for methamphetamine may be higher than those of marijuana. However, we can be confident that the odds of completion for methamphetamine is lower than the odds of completion for alcohol. 
+
+The model also suggests that there exists significant variation in completion rates between states and towns. The variation in completion of rehabilitation programs is higher between states than between towns. A state one standard deviation higher in completion rates for all drugs would have 2.011 times the odds of completion than the other state. The odds of completion of a town one standard deviation higher in completion rates for all drugs are 1.72 the odds of completion of the lower town.    
+
+   
+Figure 3 shows our prior and posterior for state and town. We have confidence that our state level standard deviation is approximately between .55 and .9 and that our town level standard deviation is between approximately .57 and .63. There is more confidence in the standard deviation for towns that there is for states. 
+
+```{r, fig.cap= c("The graphic on the left shows state level standard deviation. The graphic on the right shows town level standard deviation. The red line indicated the prior distribution, while the black line is the posterior distribution."), echo=FALSE, fig.align='center',fig.pos='H'}
+
+par(mfrow=c(1,2))
+
+sdState = Pmisc::priorPostSd(success)
+do.call(matplot, sdState$STFIPS$matplot)
+#do.call(legend, sdState$legend)
+do.call(matplot, sdState$TOWN$matplot)
+
+```
+
+##Conclusion
+
+It was determined that the odds of completing rehabilitation for hard drugs such as opioids and heroin is lower than that of soft drugs which are considered marijuana and alcohol. It was also determined that there are significant state and town level effects, meaning that the odds of completion in some towns and states are greater than for others. The variation in completion of rehabilitation programs is higher between states than between towns. Therefore, it is concluded that both the type of drug addiction being treated as well as the location of the treatment effects the odds of a successful completion. Legislators must consider both of these factors when reviewing drug rehabilitation completion rates. 
